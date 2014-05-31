@@ -9,21 +9,20 @@
 
 (facts "get-resource"
   (fact "get correct response"
-    (let [resp (github/get-resource ["/user"] test-token)]
-      (:status resp)  => 200
-      (:error resp)   => nil)))
+    (let [user (github/get-resource ["/user"] test-token)]
+      user   =not=> nil
+      (:login user) => test-user-id))
+  (fact "accepts extra-params"
+    (let [user (github/get-resource ["/user"] test-token
+                                    {:query-params {:show :all}})]
+      user =not=> nil
+      (:login user) => test-user-id)))
 
 (facts "get-current-user"
   (fact "gets proper and parsed content"
     (let [resp (github/get-current-user test-token)]
       (:error resp) => nil
       (:login resp) => test-user-id)))
-
-(facts "get-user-repos-page"
-  (fact "gets all repos on the 1st page"
-    (let [resp (github/get-user-repos-page test-user-id test-token)]
-      (:error resp) => nil
-      (:body resp) =not=> nil)))
 
 (facts "get-last-page-number"
   (fact "parses correct page number from url"
@@ -34,7 +33,7 @@
   (fact "returns correct amount of repos"
     (let [repos (github/get-user-repos test-user-id test-token)]
       (count repos) => 4
-      (-> repos first :name) => "fantom_hydra")))
+      (-> repos first :name) => "veye")))
 
 (facts "get-user-orgs"
   (fact "returns correct user-orgs"

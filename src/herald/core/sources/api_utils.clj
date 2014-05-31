@@ -1,8 +1,13 @@
 (ns herald.core.sources.api-utils
   (:require [cemerick.url :refer [url url-encode]]
             [cheshire.core :refer [parse-string]]
-            [herald.core.scm :refer [make-http-request]]
+            [clj-http.client :as http]
             [taoensso.timbre :as log]))
+
+(def default-client-opts
+  {:socket-timeout 2000
+   :conn-timeout 1000
+   :debug false})
 
 (def default-request-map
   {:method :get
@@ -68,30 +73,33 @@
   Usage:
     (process-response (http/get \"api.com/url\"))"
   [{:keys [error body] :as response}
-   & {:keys [uncut?]
-      :or {uncut? false}}]
-  (cond
-    (true? uncut?)
-      (assoc response :body (parse-string body true))
-    (nil? error)
+   & {:keys [raw-response?]
+      :or {raw-response? true}}]
+  (if (nil? error)
+    (if (false? raw-response?)
       (parse-string body true)
-    :else
-      (do
-        (log/error "#-- failed request: \n" response)
-        {:error error
-         :msg "failed request"
-         :response response})))
+      (assoc response :body (parse-string body true)))
+    ;else
+    (do
+      (log/error "#-- failed request: \n" response)
+      {:error error
+        :msg "failed request"
+        :response response})))
 
 (defmacro request-api-resource
   "macro that simplifies requesting API resources."
   [method api-url path-items api-key request-params]
   `(let [to-api-url# (api-url-builder ~api-url)
-         async?# (true? (:async? ~request-params))
-         query-params# (dissoc ~request-params :async? :channel)
+         raw-response?# (get ~request-params :raw-response? false)
          request-map# (build-request-map ~method
                                          (to-api-url# ~path-items)
                                          ~api-key
-                                         query-params#)]
-        (make-http-request request-map# :async async?#)))
+                                         ~request-params)]
+    (try
+      (process-response
+        (http/request (merge default-client-opts request-map#))
+        :raw-response? raw-response?# )
+      (catch Exception e#
+        {:error (.getMessage e#)}))))
 
 

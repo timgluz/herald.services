@@ -1,12 +1,9 @@
-(ns herald.core.sources.github
-  (:require [herald.core.scm :as scm]
-            [herald.core.sources.api-utils :as api-utils]
+(ns herald.services.apis.github
+  (:require [herald.core.sources.api-utils :as api-utils]
             [clojure.core.async :refer [<! <!! >! >!! close! chan go go-loop]
                                 :as async]
             [taoensso.timbre :as log]))
 
-(def token-key "8e5d78cd111578074c0daadf7c88aedcc1ece571")
-(def api-url "https://api.github.com")
 (def default-headers {"User-Agent" "HeraldClient (info@versioneye.com)"
                       "Accept" "application/vnd.github.v3+json"})
 (def not-nil? (comp not nil?))
@@ -21,6 +18,8 @@
       path-items
       api-key
       (merge {:headers default-headers} extra-params))))
+
+;;TODO: add ratelimit func
 
 ;; resource functions
 (defn get-current-user
@@ -56,6 +55,7 @@
           (recur (conj pages resp))
           pages)))))
 
+;;TODO: returns :channel if required
 (defn fetch-pagination
   [request-fn & {:keys [start end] :or {start 1}}]
   (let [first-response (request-fn start)

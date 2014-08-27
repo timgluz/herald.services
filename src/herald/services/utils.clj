@@ -1,9 +1,41 @@
-(ns herald.core.sources.api-utils
+(ns herald.apis.utils
   (:require [cemerick.url :refer [url url-encode]]
             [cheshire.core :refer [parse-string]]
             [clj-http.client :as http]
             [taoensso.timbre :as log]))
 
+(defn get-template-keys
+  [^String template-str]
+  (->> template-str
+       (re-seq #"(?<=[\/ | \.]\:\w+)")
+       (map read-string)
+       (into #{})))
+
+(defn check-replacement
+  [^String template-str value-dt]
+  (let [templ-keys (get-template-keys template-str)
+        value-keys (set (keys value-dt))
+        diffs (clojure.set/difference templ-keys value-keys)]
+    (when-not (empty? diffs)
+      (throw
+        (IllegalArgumentException.
+          (str "Template `" template-str "` is missing replacements for: " diffs))))))
+
+
+(defn match-path-template
+  [url-template replacement-dt]
+  (check-replacement url-template replacement-dt)
+
+  (reduce (fn [acc [tmpl-key tmpl-val]]
+            (clojure.string/replace acc (str tmpl-key) (str tmpl-val)))
+          url-template
+          replacement-dt))
+
+
+
+
+
+;;--------------------------------------------
 (def default-client-opts
   {:socket-timeout 2000
    :conn-timeout 1000
@@ -11,7 +43,7 @@
 
 (def default-request-map
   {:method :get
-   :headers {"User-Agent" "Heral core client (info@versioneye.com)"
+   :headers {"User-Agent" "Herald core client (info@versioneye.com)"
              "Connection" "Keep-Alive"}})
 
 (defn build-url
@@ -46,13 +78,12 @@
     (make-git-url [\"feed\"] :since \"today\")"
   [api-url]
   (fn [path-items & query-params]
-    (build-url
-      api-url
-      (->>
-        (if (string? path-items) [path-items] path-items)
-        (interpose \/)
-        (apply str))
-      (apply hash-map query-params))))
+    (build-url api-url
+              (->>
+                (if (string? path-items) [path-items] path-items)
+                (interpose \/)
+                (apply str))
+              (apply hash-map query-params))))
 
 (defn build-request-map
   ([method url api-key]
@@ -101,5 +132,11 @@
         :raw-response? raw-response?# )
       (catch Exception e#
         {:error (.getMessage e#)}))))
+
+;;TODO: REST resource
+
+(defn make-req
+  [client method ])
+
 
 

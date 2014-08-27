@@ -2,6 +2,17 @@
   (:require [schema.core :as s]
             [schema.macros :as sm]))
 
+(defn response-walker [schema coerce-fn]
+  (s/start-walker
+    (fn [s]
+      (let [walk (s/walker s)]
+        (fn [x]
+          (let [result (walk x)]
+            (coerce-fn result)))))
+    schema))
+
+
+
 (def Paging {:current s/Int
              :per-page s/Int
              :total s/Int
@@ -22,6 +33,7 @@
 
 (sm/defrecord SRResponse
   [status :- s/Int
+   headers :- s/Any
    body   :- s/Any])
 
 (sm/defrecord SRError

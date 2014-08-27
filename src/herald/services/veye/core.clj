@@ -4,8 +4,8 @@
             [blancas.morph.monads :refer [either left right]]
             [clojure.string :as string]
             [taoensso.timbre :as log]
-            [herald.services.schemas :as schemas]
-            [herald.services.clients :refer [make-client] :as clients])
+            [herald.services.schemas :as schemas :refer [response-walker]]
+            [herald.services.clients :as clients])
   (:import [herald.services.schemas SRError SRPagedEntity SREntity]
            [herald.services.clients VeyeClient]
            [blancas.morph.monads Either]))
@@ -38,15 +38,7 @@
 
 (defmethod sub-coerce-search :default [item]
   item)
-(defn response-walker [schema coerce-fn]
-  (s/start-walker
-    (fn [s]
-      (let [walk (s/walker s)]
-        (fn [x]
-          (let [result (walk x)]
-            ;(log/debug "Result : " result " coerced : " (sub-coerce-search result))
-            (coerce-fn result)))))
-    schema))
+
 
 (def VeyeSearchItem {:name s/Str
                      :language s/Str
@@ -146,7 +138,6 @@
 (defmethod coerce-response :default [type response]
   (log/error "Veye: Not supported coercer: " type))
 
-
 ;;-- API functions
 (sm/defn search :- Either
   "Search packages on VersionEye."
@@ -242,6 +233,7 @@
           (right (SREntity. coerced-dt))
           (left (SRError. 503 "Coercing error - update::project schema" resp)))))))
 
+;;TODO: remove it and add into README
 (comment
   (require '[herald.services.clients :refer [make-client] :as clients] :reload)
   (require '[herald.services.veye.core :as veye] :reload)

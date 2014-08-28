@@ -17,6 +17,19 @@
         (get-in dt [:data :username]) => test-user
         (get-in dt [:data :type])     => "user"))))
 
+(facts "get-user-orgs"
+  (let [client (make-client :github {:key "test" :secret secret-key} {})]
+    (fact "returns correct list of user's organizations"
+      (let [resp (git/get-user-orgs client 1)
+            dt (run-right resp)]
+        (right? resp) => true
+        (map? dt)     => true
+        (count (:data dt)) => 1
+        (get-in dt [:data 0 :username]) => "tauho"
+        (:paging dt)  => {:current 1
+                          :per-page 30
+                          :total 1
+                          :total-items 1}))))
 
 (facts "search"
   (let [client (make-client :github {:key "test" :secret secret-key} {})]
@@ -26,8 +39,7 @@
         (right? resp) => true
         (map? dt)     => true
         (contains? dt :data)  => true
-        (count (:data dt))    => 2
-        ))))
+        (count (:data dt))    => 2))))
 
 (facts "get-user-repos"
   (let [client (make-client :github {:key "test" :secret secret-key} {})]

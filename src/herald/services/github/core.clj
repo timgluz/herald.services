@@ -11,6 +11,7 @@
            [herald.services.clients GithubClient]
            [blancas.morph.monads Either]))
 
+(def default-per-page 30)
 
 ;;-- COERCERS
 ;- user entity coercer
@@ -21,7 +22,7 @@
 
 ;- matcher schema for multimethod dispatch
 (def GithubUser {:login s/Str
-                 :type s/Str
+                 (s/optional-key :type) s/Str
                  s/Keyword s/Any})
 
 
@@ -98,62 +99,7 @@
    :pullable  (get-in block [:permissions :pullable])
    })
 
-;- response coercers
-(def GithubSearchResponse {:items [GithubRepoItem]
-                           :total_count s/Int
-                           :incomplete_results s/Bool
-                           s/Keyword s/Any})
-
-(def GithubEntityList [GithubRepoItem])
-
-(defmulti coerce-response (fn [type _] type))
-
-(defmethod coerce-response ::raw [_ response]
-  (get response :body {}))
-
-(defmethod coerce-response ::user [_ response]
-  ((response-walker GithubUser coerce-user-item)
-   (get response :body {})))
-
-(defmethod coerce-response ::search [_ response]
-  ((response-walker GithubSearchResponse coerce-repo-item)
-   (get response :body {})))
-
-(defmethod coerce-response ::repos [_ response]
-  ((response-walker GithubEntityList coerce-repo-item)
-   (vec (get response :body []))))
-
-(defmethod coerce-response :default [type response]
-  (log/error "Github/core not supported coercer: " type))
-
-;;-- API functions
-
-(sm/defn get-current-user :- Either
-  "Fetches user information about auth key owners"
-  [client :- GithubClient]
-  (either [resp (clients/rpc-call client :get "user")]
-    (left resp)
-    (if-let [coerced-dt (coerce-response ::user resp)]
-      (right (SREntity. coerced-dt))
-      (left (SRError. 503 "Coercing error - get-current-user" resp)))))
-
-(def SearchOptions {(s/optional-key :sort) s/Str
-                    (s/optional-key :order) (s/enum "asc" "desc")})
-
-(sm/defn search :- Either
-  "Search repositories on Github"
-  [client :- GithubClient
-   term :- s/Str
-   options :- SearchOptions]
-  (either [resp (clients/rpc-call client
-                                  :get "/search/repositories"
-                                  (merge {:q term} options))]
-    (left resp)
-    (if-let [coerced-dt (coerce-response ::search resp)]
-      (right (SREntity. (:items coerced-dt)))
-      (left (SRError. 503 "Coercing error - search" resp)))))
-
-(def default-per-page 30)
+;;-- Pagination coercer
 (defn- parse-pagination
   "parses github pagination links from response[:headers][\"Links\"]"
   [links]
@@ -180,6 +126,76 @@
       :total 1
       :total-items 1})))
 
+
+;- response coercers
+(def GithubSearchResponse {:items [GithubRepoItem]
+                           :total_count s/Int
+                           :incomplete_results s/Bool
+                           s/Keyword s/Any})
+
+(def GithubEntityList [(s/either GithubRepoItem GithubUser)])
+
+(defmulti coerce-response (fn [type _] type))
+
+(defmethod coerce-response ::raw [_ response]
+  (get response :body {}))
+
+(defmethod coerce-response ::user [_ response]
+  ((response-walker GithubUser coerce-user-item)
+   (get response :body {})))
+
+(defmethod coerce-response ::user-orgs [_ response]
+  ((response-walker GithubEntityList coerce-user-item)
+   (get response :body [])))
+
+(defmethod coerce-response ::search [_ response]
+  ((response-walker GithubSearchResponse coerce-repo-item)
+   (get response :body {})))
+
+(defmethod coerce-response ::repos [_ response]
+  ((response-walker GithubEntityList coerce-repo-item)
+   (vec (get response :body []))))
+
+(defmethod coerce-response :default [type response]
+  (log/error "Github/core not supported coercer: " type))
+
+;;-- API functions
+(sm/defn get-current-user :- Either
+  "Fetches user information about auth key owners"
+  [client :- GithubClient]
+  (either [resp (clients/rpc-call client :get "user")]
+    (left resp) ;; passes client error into caller-fn
+    (if-let [coerced-dt (coerce-response ::user resp)]
+      (right (SREntity. coerced-dt))
+      (left (SRError. 503 "Coercing error - get-current-user" resp)))))
+
+(sm/defn get-user-orgs :- Either
+  "Returns list of organization objects, where user has access to."
+  [client :- GithubClient
+   page :- s/Int]
+  (either [resp (clients/rpc-call client :get "/user/orgs")]
+    (left resp)
+    (if-let [coerced-dt (coerce-response ::user-orgs resp)]
+      (right
+        (SRPagedEntity. coerced-dt (coerce-pagination page resp)))
+      (left (SRError. 503 "Coercing error - get-user-orgs" resp)))))
+
+(def SearchOptions {(s/optional-key :sort) s/Str
+                    (s/optional-key :order) (s/enum "asc" "desc")})
+
+(sm/defn search :- Either
+  "Search repositories on Github"
+  [client :- GithubClient
+   term :- s/Str
+   options :- SearchOptions]
+  (either [resp (clients/rpc-call client
+                                  :get "/search/repositories"
+                                  (merge {:q term} options))]
+    (left resp)
+    (if-let [coerced-dt (coerce-response ::search resp)]
+      (right (SREntity. (:items coerced-dt)))
+      (left (SRError. 503 "Coercing error - search" resp)))))
+
 (sm/defn get-user-repos :- Either
   "returns paginated list of token owner's repos."
   [client :- GithubClient
@@ -190,7 +206,6 @@
       (right
         (SRPagedEntity. coerced-dt (coerce-pagination page resp)))
       (left (SRError. 503 "Coercing error - get-user-repos" resp)))))
-
 
 (sm/defn get-org-repos :- Either
   "returns list of organization's repos to which token's owner has access"
@@ -204,6 +219,8 @@
         (SRPagedEntity. coerced-dt (coerce-pagination page resp)))
       (left (SRError. 503 "Coercing error - get-org-repos" resp)))))
 
+
+
 (comment
   ;;TODO: into readme or doc and use cases
   (require '[herald.services.clients :as clients :refer [make-client]] :reload)
@@ -215,6 +232,8 @@
   (def client (make-client :github {:key "test" :secret token2} {}))
 
   (git/get-current-user client)
+  (git/get-user-orgs client 1)
+
   (git/search client "veye" {})
   (git/get-user-repos client 1)
   (git/get-org-repos client "tauho" 1)

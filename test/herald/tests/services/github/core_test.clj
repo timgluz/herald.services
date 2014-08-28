@@ -66,5 +66,22 @@
                                   :total 1
                                   :total-items 1}))))
 
+(def test-repo "heraldtest/fantom_hydra")
+
+(facts "get-repo-branches"
+  (let [client (make-client :github {:key "test" :secret secret-key} {})]
+    (fact "returns correct list of branches with commit sha"
+      (let [resp (git/get-repo-branches client test-repo 1)
+            dt (run-right resp)]
+        (right? resp) => true
+        (map? dt)     => true
+        (-> dt :data count) => 3
+        (-> dt :data first :name) => "clojure_branch"
+        (get-in dt [:paging]) => {:current 1
+                                  :per-page 30
+                                  :total 1
+                                  :total-items 1}
+        ))))
+
 
 (facts "get-org-repos")

@@ -62,6 +62,10 @@
                      :owner GithubRepoOwner
                      s/Keyword s/Any})
 
+(def GithubRepoBranch {:name s/Str
+                       :commit {:sha s/Str
+                                :url s/Str}})
+
 (defmulti coerce-repo-item
   (fn [block]
     (cond
@@ -99,6 +103,20 @@
    :pullable  (get-in block [:permissions :pullable])
    })
 
+;;-- repo branch coercer
+(defmulti coerce-repo-branch
+  (fn [block]
+    (if (matches-schema? GithubRepoBranch block)
+      :branch
+      :default)))
+
+(defmethod coerce-repo-branch :branch [block]
+  {:name (-> block :name str)
+   :sha (-> block :commit :sha str)})
+
+(defmethod coerce-repo-branch :default [block]
+  block)
+
 ;;-- Pagination coercer
 (defn- parse-pagination
   "parses github pagination links from response[:headers][\"Links\"]"
@@ -133,7 +151,7 @@
                            :incomplete_results s/Bool
                            s/Keyword s/Any})
 
-(def GithubEntityList [(s/either GithubRepoItem GithubUser)])
+(def GithubEntityList [(s/either GithubRepoItem GithubRepoBranch GithubUser)])
 
 (defmulti coerce-response (fn [type _] type))
 
@@ -154,6 +172,10 @@
 
 (defmethod coerce-response ::repos [_ response]
   ((response-walker GithubEntityList coerce-repo-item)
+   (vec (get response :body []))))
+
+(defmethod coerce-response ::branches [_ response]
+  ((response-walker GithubEntityList coerce-repo-branch)
    (vec (get response :body []))))
 
 (defmethod coerce-response :default [type response]
@@ -219,7 +241,17 @@
         (SRPagedEntity. coerced-dt (coerce-pagination page resp)))
       (left (SRError. 503 "Coercing error - get-org-repos" resp)))))
 
-
+(sm/defn get-repo-branches :- Either
+  "returns list of repo branches"
+  [client :- GithubClient
+   repo   :- s/Str
+   page   :- s/Int]
+  (either [resp (clients/rpc-call client :get ["repos" repo "branches"])]
+    (left resp) ;; pass client error
+    (if-let [coerced-dt (coerce-response ::branches resp)]
+      (right
+        (SRPagedEntity. coerced-dt (coerce-pagination page resp)))
+      (left (SRError. 503 "Coercing error - get-repo-branches" resp)))))
 
 (comment
   ;;TODO: into readme or doc and use cases
@@ -238,5 +270,6 @@
   (git/get-user-repos client 1)
   (git/get-org-repos client "tauho" 1)
 
+  (git/get-repo-branches client "heraldtest/fantom_hydra" 1)
   )
 

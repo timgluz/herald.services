@@ -21,10 +21,6 @@
 
 ;;TODO: add ratelimit func
 
-(defn get-user-orgs
-  [user-id api-key]
-  (fetch-paginated-resource ["/users" user-id "orgs"] api-key))
-
 (defn get-repo-branches
   [repo-name api-key]
   (get-resource ["/repos" repo-name "branches"] api-key))

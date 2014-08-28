@@ -3,6 +3,7 @@
             [schema.macros :as sm]
             [blancas.morph.monads :refer [either left right]]
             [clojure.string :as string]
+            [cemerick.url :refer [url]]
             [taoensso.timbre :as log]
             [herald.services.clients :as clients]
             [herald.services.schemas :as schemas :refer [response-walker]])
@@ -53,7 +54,7 @@
                      :html_url s/Str
                      :git_url s/Str
                      :description s/Str
-                     :language s/Str
+                     :language (s/either s/Str (s/pred nil?))
                      :default_branch s/Str
                      :private s/Bool
                      :fork s/Bool
@@ -81,27 +82,29 @@
    :pullable (get block :pull false)})
 
 (defmethod coerce-repo-item :repo [block]
-  {:scm_id (-> block :id str)
-   :name (:name block)
-   :fullname (:full_name block)
+  {:scm_id    (-> block :id str)
+   :name      (:name block)
+   :fullname  (:full_name block)
    :description (:description block)
-   :html_url (:html_url block)
-   :scm_url (:git_url block)
-   :language (:language block)
+   :html_url  (:html_url block)
+   :scm_url   (:git_url block)
+   :language  (str (:language block))
    :default_branch (:default_branch block)
    :owner_login (get-in block [:owner :login])
-   :private (:private block)
-   :fork (:fork block)
-   :admin (get-in block [:permission :admin])
-   :pushable (get-in block [:permission :pushable])
-   :pullable (get-in block [:permission :pullable])
+   :private   (:private block)
+   :fork      (:fork block)
+   :admin     (get-in block [:permissions :admin])
+   :pushable  (get-in block [:permissions :pushable])
+   :pullable  (get-in block [:permissions :pullable])
    })
 
 ;- response coercers
-(def GithubListResponse {:items [GithubRepoItem]
-                         (s/optional-key :total_count) s/Int
-                         (s/optional-key :incomplete_results) s/Bool
-                         s/Keyword s/Any})
+(def GithubSearchResponse {:items [GithubRepoItem]
+                           :total_count s/Int
+                           :incomplete_results s/Bool
+                           s/Keyword s/Any})
+
+(def GithubEntityList [GithubRepoItem])
 
 (defmulti coerce-response (fn [type _] type))
 
@@ -113,8 +116,12 @@
    (get response :body {})))
 
 (defmethod coerce-response ::search [_ response]
-  ((response-walker GithubListResponse coerce-repo-item)
+  ((response-walker GithubSearchResponse coerce-repo-item)
    (get response :body {})))
+
+(defmethod coerce-response ::repos [_ response]
+  ((response-walker GithubEntityList coerce-repo-item)
+   (vec (get response :body []))))
 
 (defmethod coerce-response :default [type response]
   (log/error "Github/core not supported coercer: " type))
@@ -146,14 +153,71 @@
       (right (SREntity. (:items coerced-dt)))
       (left (SRError. 503 "Coercing error - search" resp)))))
 
+(def default-per-page 30)
+(defn- parse-pagination
+  "parses github pagination links from response[:headers][\"Links\"]"
+  [links]
+  (apply merge
+    (map
+      (fn [link]
+        (when-let [matches (re-find #"\<(\S+)\>;\s+rel=\"(\w+)\"" link)]
+          (apply #(hash-map (keyword %2) %1)
+                 (rest matches))))
+      (string/split (str links) #"\,"))))
+
+(defn- coerce-pagination
+  [current-page resp]
+  (let [links (get-in resp [:headers "Link"])]
+    (if-let [link-dt (parse-pagination links)]
+      (let [last-url (url (:last link-dt))
+            last-page (Integer. (get-in last-url [:query "page"]))]
+        {:current current-page
+        :per-page default-per-page
+        :total last-page
+        :total-items (* default-per-page last-page)})
+      {:current current-page
+      :per-page default-per-page
+      :total 1
+      :total-items 1})))
+
+(sm/defn get-user-repos :- Either
+  "returns paginated list of token owner's repos."
+  [client :- GithubClient
+   page :- s/Int]
+  (either [resp (clients/rpc-call client :get "/user/repos" {:page page :type "all"})]
+    (left resp)
+    (if-let [coerced-dt (coerce-response ::repos resp)]
+      (right
+        (SRPagedEntity. coerced-dt (coerce-pagination page resp)))
+      (left (SRError. 503 "Coercing error - get-user-repos" resp)))))
+
+
+(sm/defn get-org-repos :- Either
+  "returns list of organization's repos to which token's owner has access"
+  [client :- GithubClient
+   org-name :- s/Str
+   page :- s/Int]
+  (either [resp (clients/rpc-call client :get ["orgs" org-name "repos"] {:page page})]
+    (left resp)
+    (if-let [coerced-dt (coerce-response ::repos resp)]
+      (right
+        (SRPagedEntity. coerced-dt (coerce-pagination page resp)))
+      (left (SRError. 503 "Coercing error - get-org-repos" resp)))))
+
 (comment
+  ;;TODO: into readme or doc and use cases
   (require '[herald.services.clients :as clients :refer [make-client]] :reload)
   (require '[herald.services.github.core :as git] :reload)
 
   (def token "7790a09b31c734f8581d581aa33bb8ece1e7149f")
-  (def client (make-client :github {:key "test" :secret token} {}))
+  (def token2 "8e5d78cd111578074c0daadf7c88aedcc1ece571")
+
+  (def client (make-client :github {:key "test" :secret token2} {}))
 
   (git/get-current-user client)
   (git/search client "veye" {})
+  (git/get-user-repos client 1)
+  (git/get-org-repos client "tauho" 1)
+
   )
 

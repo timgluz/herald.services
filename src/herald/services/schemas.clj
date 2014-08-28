@@ -11,8 +11,6 @@
             (coerce-fn result)))))
     schema))
 
-
-
 (def Paging {:current s/Int
              :per-page s/Int
              :total s/Int

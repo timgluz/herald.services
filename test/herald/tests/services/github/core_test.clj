@@ -29,3 +29,30 @@
         (count (:data dt))    => 2
         ))))
 
+(facts "get-user-repos"
+  (let [client (make-client :github {:key "test" :secret secret-key} {})]
+    (fact "returns correct results for page.1"
+      (let [resp (git/get-user-repos client 1)
+            dt (run-right resp)]
+        (right? resp) => true
+        (map? dt)     => true
+        (count (:data dt)) => 4
+        (get-in dt [:paging]) => {:current 1
+                                  :per-page 30
+                                  :total 1
+                                  :total-items 1}))))
+(facts "get-org-repos"
+  (let [client (make-client :github {:key "test" :secret secret-key} {})]
+    (fact "returns correct results for page.1"
+      (let [resp (git/get-org-repos client "tauho" 1)
+            dt (run-right resp)]
+        (right? resp) => true
+        (map? dt)     => true
+        (count (:data dt)) => 8
+        (get-in dt [:paging]) => {:current 1
+                                  :per-page 30
+                                  :total 1
+                                  :total-items 1}))))
+
+
+(facts "get-org-repos")

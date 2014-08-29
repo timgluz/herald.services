@@ -25,80 +25,79 @@
             [this method path query-params]
             [this method path query-params extra-client-opts]))
 
-;;-- RPC client implementations
+;;-- client helper functions
 (defn build-url
+  "builds full url from root-url , api path and query-params.
+  NB! if path has `/` as first character, then it means add it to root-url,
+  and replace already existing path; if you dont use `/` as first character
+  of path string, then it will be appended to already existing path.
+  Example:
+    (build-url \"https://www.versioneye.com/api/v2\" \"/me\" nil)
+    returns: https://www.versioneye.com/me
+    BUT NOT: https://www.versioneye.com/api/v2/me
+  "
   [api-url path query-params]
-  (let [path-str (condp instance? path
+  (let [query-params_ (if (empty? query-params)
+                        {} ;;if query-params is nil
+                        query-params)
+        path-str (condp instance? path
                    String path
                    Number (str path)
                    clojure.lang.Keyword (name path)
                    clojure.lang.Seqable (->> path (interpose \/) (apply str)))]
     (-> api-url
         (url path-str)
-        (assoc :query query-params)
+        (assoc :query query-params_)
         str)))
 
 (defn do-request
   "does plain HTTP request and returns response boxed into Either-monad"
   [request-dt]
-    (make-either
-      (http/request request-dt)))
+  (make-either
+    (http/request request-dt)))
 
+(sm/defn build-request
+  [client :- IRPC_Client
+   method  :- (s/enum :get :post :put :delete :patch)
+   path  :- (s/either s/Keyword s/Str [s/Any])
+   query-params :- {s/Keyword s/Any}
+   extra-client-opts :- {s/Any s/Any}]
+  (let [url-str (build-url (:api-url client) path query-params)]
+    (merge (:client-opts client)
+            {:method method
+            :url url-str}
+            (when-not (:empty? extra-client-opts)
+              extra-client-opts))))
 
 ;;-- Client implementations
-
-;;TODO: refactor as schema/defrecord as Github client
-(defrecord VeyeClient [api-url auth client-opts]
-  IRequestBuilder
-  (build-request [this method path query-params extra-client-opts]
-    (let [url-str (build-url (:api-url this) path {})]
-      (merge (:client-opts this)
-             {:method method
-              :url url-str}
-             (when-not (:empty? query-params)
-               {:query-params query-params})
-             (when-not (:empty? extra-client-opts)
-               extra-client-opts))))
+(sm/defrecord VeyeClient
+  [api-url  :- s/Str
+   auth     :- schemas/Auth
+   client-opts :- schemas/ClientOptions]
   IAuthorizer
   (append-auth [this request-dt]
     (assoc-in request-dt
               [:query-params :api_key]
               (get-in this [:auth :secret])))
-
   IRPC_Client
   (rpc-call [this method path]
     (rpc-call this method path {} {}))
   (rpc-call [this method path query-params]
     (rpc-call this method path query-params {}))
-
-
   (rpc-call [this method path query-params extra-client-opts]
     (let [request-dt (build-request this method path query-params extra-client-opts)]
       (either [resp (do-request (append-auth this request-dt))]
         (do
-          ; left form
           (log/error "VeyeClient:rpc-call failed: " path "\n " resp)
-          (left (assoc resp
-                       :body {:error :request-error
-                              :msg (str "VeyeClient cant access resource: " path)
-                              :data {:path path
-                                     :query-params query-params
-                                     :body (:body resp)}})))
-        (right resp)))))
-
+          (left (SRError. (:status resp)
+                          (str "VeyeClient cant access resource: " path)
+                          resp)))
+        (right (SRResponse. (:status resp) (:headers resp) (:body resp)))))))
 
 (sm/defrecord GithubClient
   [api-url :- s/Str
    auth :- schemas/Auth
    client-opts :- schemas/ClientOptions]
-  IRequestBuilder
-  (build-request [this method path query-params extra-client-opts]
-    (let [url-str (build-url (:api-url this) path query-params)]
-      (merge (:client-opts this)
-             {:method method
-              :url url-str}
-             (when-not (:empty? extra-client-opts)
-               extra-client-opts))))
   IAuthorizer
   (append-auth [this request-dt]
     (assoc-in request-dt

@@ -232,18 +232,3 @@
         (if-let [coerced-dt (coerce-response ::project resp)]
           (right (SREntity. coerced-dt))
           (left (SRError. 503 "Coercing error - update::project schema" resp)))))))
-
-;;TODO: remove it and add into README
-(comment
-  (require '[herald.services.clients :refer [make-client] :as clients] :reload)
-  (require '[herald.services.veye.core :as veye] :reload)
-
-  (def client (make-client :veye {:key "aaa" :secret "ba7d93beb5de7820764e"} {}))
-  (veye/search client "veye" {})
-  (veye/get-projects client)
-  (veye/get-project client "lein_project_clj_1")
-
-  (def file-content (slurp "test/herald/files/Gemfile.lock"))
-  (veye/create-project client "Gemfile.lock" file-content)
-  )
-

@@ -46,7 +46,7 @@ A Clojure library designed to consume various API endpoint and coerce responses 
   
 ## License
 
-Copyright © 2014 FIXME
+Copyright © 2014 Timo Sulg, VersionEye GMBH 
 
 Distributed under the Eclipse Public License either version 1.0 or (at
 your option) any later version.

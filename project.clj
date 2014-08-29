@@ -1,6 +1,6 @@
 (defproject herald.services "0.2.0-SNAPSHOT"
-  :description "API connector"
-  :url "http://tauho.github.com"
+  :description "API consumers for Herald App"
+  :url "http://github.com/timgluz/herald.services"
   :license {:name "Eclipse Public License"
             :url "http://www.eclipse.org/legal/epl-v10.html"}
   :min-lein-version "2.0.0"
@@ -8,7 +8,6 @@
                  [prismatic/fnhouse "0.1.1"]
                  [prismatic/schema "0.2.6"]
                  [cheshire "5.3.1"]
-                 [org.clojure/core.async "0.1.303.0-886421-alpha"]
                  [com.cemerick/url "0.1.1"]
                  [org.blancas/morph "0.3.0"]
                  [base64-clj "0.1.1"]

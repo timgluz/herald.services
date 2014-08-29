@@ -5,6 +5,7 @@
             [clojure.string :as string]
             [cemerick.url :refer [url]]
             [taoensso.timbre :as log]
+            [base64-clj.core :as base64]
             [herald.services.clients :as clients]
             [herald.services.schemas :as schemas :refer [response-walker]])
   (:import [herald.services.schemas SRError SRPagedEntity SREntity]
@@ -40,7 +41,6 @@
 (defmethod coerce-user-item :default [block]
   block)
 
-;- search coercer
 (def GithubRepoPermission {:admin s/Bool
                            :pull s/Bool
                            :push s/Bool})
@@ -65,6 +65,13 @@
 (def GithubRepoBranch {:name s/Str
                        :commit {:sha s/Str
                                 :url s/Str}})
+
+(def GithubRepoTreeItem {:path s/Str
+                         :mode s/Str
+                         :type s/Str
+                         :size s/Int
+                         :sha s/Str
+                         :url s/Str})
 
 (defmulti coerce-repo-item
   (fn [block]
@@ -117,6 +124,51 @@
 (defmethod coerce-repo-branch :default [block]
   block)
 
+;;-- repo tree coercer
+(defmulti coerce-repo-tree
+  (fn [block]
+    (if (matches-schema? GithubRepoTreeItem block)
+      :tree-item
+      :default)))
+
+(defmethod coerce-repo-tree :tree-item [block]
+  (let [filename (-> block :path str (string/split #"\/") last)]
+    {:name filename
+     :path (:path block)
+     :commit_sha (:sha block)
+     :size (:size block)
+     :url (:url block)}))
+
+(defmethod coerce-repo-tree :default [block]
+  block)
+
+;;-- repo-file coercer
+(def GithubFileContent {:path s/Str
+                        :encoding s/Str
+                        :content s/Str
+                        :name s/Str
+                        :size s/Int
+                        s/Keyword s/Any})
+
+(defmulti coerce-file-content
+  (fn [block]
+    (if (matches-schema? GithubFileContent block)
+      :file
+      :default)))
+
+(defmethod coerce-file-content :file [block]
+  (let [file-content (-> block
+                         :content str
+                         (string/replace #"[^A-Za-z0-9\+\/\=]"  "")
+                         (base64/decode "UTF-8"))]
+    {:name (:name block)
+     :path (:path block)
+     :size (:size block)
+     :encoding "str"
+     :content file-content}))
+
+(defmethod coerce-file-content :default [block] block)
+
 ;;-- Pagination coercer
 (defn- parse-pagination
   "parses github pagination links from response[:headers][\"Links\"]"
@@ -153,6 +205,11 @@
 
 (def GithubEntityList [(s/either GithubRepoItem GithubRepoBranch GithubUser)])
 
+(def GithubRepoTree {:sha s/Str
+                     :url s/Str
+                     :tree [GithubRepoTreeItem]
+                     s/Keyword s/Any})
+
 (defmulti coerce-response (fn [type _] type))
 
 (defmethod coerce-response ::raw [_ response]
@@ -177,6 +234,14 @@
 (defmethod coerce-response ::branches [_ response]
   ((response-walker GithubEntityList coerce-repo-branch)
    (vec (get response :body []))))
+
+(defmethod coerce-response ::repo-tree [_ response]
+  ((response-walker GithubRepoTree coerce-repo-tree)
+   (get response :body {})))
+
+(defmethod coerce-response ::file-content [_ response]
+  ((response-walker GithubFileContent coerce-file-content)
+   (get response :body {})))
 
 (defmethod coerce-response :default [type response]
   (log/error "Github/core not supported coercer: " type))
@@ -253,15 +318,43 @@
         (SRPagedEntity. coerced-dt (coerce-pagination page resp)))
       (left (SRError. 503 "Coercing error - get-repo-branches" resp)))))
 
+(sm/defn get-repo-tree
+  [client :- GithubClient
+   repo :- s/Str
+   sha :- s/Str]
+  (either [resp (clients/rpc-call client
+                                  :get ["repos" repo "git/trees" sha])
+                                  {:recursive 1}]
+    (left resp)
+    (if-let [coerced-dt (coerce-response ::repo-tree resp)]
+      (right (SREntity. (:tree coerced-dt)))
+      (left (SRError. 503 "Coercing error - get-repo-tree" resp)))))
+
+
+(sm/defn get-file-content
+  "gets a content of repofile by the path and ref-key;
+  Here `ref-key` may be a name of branch, branch's commit-sha or tag id.
+  Name of branch gives a latest version; sha or tag-id fixed version;"
+  [client :- GithubClient
+   repo :- s/Str
+   ref-key :- s/Str
+   file-path :- s/Str]
+  (either [resp (clients/rpc-call client
+                                  :get ["repos" repo "contents" file-path]
+                                  {:ref ref-key})]
+    (left resp)
+    (if-let [coerced-dt (coerce-response ::file-content resp)]
+      (right (SREntity. coerced-dt))
+      (left (SRError. 503 "Coercing error - get-file-fontent" resp)))))
+
 (comment
   ;;TODO: into readme or doc and use cases
   (require '[herald.services.clients :as clients :refer [make-client]] :reload)
   (require '[herald.services.github.core :as git] :reload)
 
   (def token "7790a09b31c734f8581d581aa33bb8ece1e7149f")
-  (def token2 "8e5d78cd111578074c0daadf7c88aedcc1ece571")
 
-  (def client (make-client :github {:key "test" :secret token2} {}))
+  (def client (make-client :github {:key "test" :secret token} {}))
 
   (git/get-current-user client)
   (git/get-user-orgs client 1)
@@ -270,6 +363,11 @@
   (git/get-user-repos client 1)
   (git/get-org-repos client "tauho" 1)
 
-  (git/get-repo-branches client "heraldtest/fantom_hydra" 1)
+  (def test-repo "heraldtest/fantom_hydra")
+  (def test-sha "20b9c1193a16c1d86f2a524d30c3e37bd0050bc4")
+  (git/get-repo-branches client test-repo 1)
+  (git/get-repo-tree client test-repo test-sha)
+  (git/get-file-content client test-repo test-sha "Gemfile")
+
   )
 

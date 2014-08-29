@@ -11,6 +11,7 @@
                  [org.clojure/core.async "0.1.303.0-886421-alpha"]
                  [com.cemerick/url "0.1.1"]
                  [org.blancas/morph "0.3.0"]
+                 [base64-clj "0.1.1"]
                  [com.taoensso/timbre "3.2.1"]]
   :profiles {:dev
               {:dependencies [[org.clojure/clojure "1.6.0"]]}

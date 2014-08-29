@@ -97,8 +97,6 @@
       (merge (:client-opts this)
              {:method method
               :url url-str}
-             #_(when-not (:empty? query-params)
-               {:query-params query-params})
              (when-not (:empty? extra-client-opts)
                extra-client-opts))))
   IAuthorizer

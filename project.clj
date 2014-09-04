@@ -1,4 +1,4 @@
-(defproject herald.services "0.2.0-SNAPSHOT"
+(defproject herald.services "0.2.1"
   :description "API consumers for Herald App"
   :url "http://github.com/timgluz/herald.services"
   :license {:name "Eclipse Public License"
@@ -13,7 +13,8 @@
                  [base64-clj "0.1.1"]
                  [com.taoensso/timbre "3.2.1"]]
   :profiles {:dev
-              {:dependencies [[org.clojure/clojure "1.6.0"]]}
+              {:dependencies [[org.clojure/clojure "1.6.0"]]
+               :plugins [[lein-localrepo "0.5.3"]]}
              :test
               {:dependencies [[org.clojure/clojure "1.6.0"]
                               [midje "1.6.3"]]

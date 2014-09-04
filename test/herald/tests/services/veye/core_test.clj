@@ -8,6 +8,17 @@
 (def project-key "lein_project_clj_1")
 (def test-filepath "test/herald/files/Gemfile.lock")
 (def test-filename "Gemfile.lock")
+(def test-username "timgluz")
+
+(facts "get-current-user"
+  (let [client (make-client :veye {:key "test" :secret secret-key} {})]
+    (fact "returns a correct data about token owner"
+      (let [resp (veye/get-current-user client)
+            dt (run-right resp)]
+        (right? resp) => true
+        (map? dt)     => true
+        (get-in dt [:data :username]) => test-username
+        (get-in dt [:data :type])     => "user"))))
 
 (facts "search"
   (let [client (make-client :veye {:key "test" :secret secret-key} {})]

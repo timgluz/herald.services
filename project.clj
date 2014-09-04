@@ -1,5 +1,6 @@
-(defproject herald.services "0.2.1"
+(defproject herald.services "0.2.2"
   :description "API consumers for Herald App"
+  :scm "https://github.com/timgluz/herald.services"
   :url "http://github.com/timgluz/herald.services"
   :license {:name "Eclipse Public License"
             :url "http://www.eclipse.org/legal/epl-v10.html"}

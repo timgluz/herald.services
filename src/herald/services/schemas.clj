@@ -2,6 +2,11 @@
   (:require [schema.core :as s]
             [schema.macros :as sm]))
 
+(defn matches-schema?
+  [schema block]
+  (and (map? block)
+       ((comp empty? s/check) schema block)))
+
 (defn response-walker [schema coerce-fn]
   (s/start-walker
     (fn [s]

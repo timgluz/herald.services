@@ -4,13 +4,36 @@
             [blancas.morph.monads :refer [either left right]]
             [clojure.string :as string]
             [taoensso.timbre :as log]
-            [herald.services.schemas :as schemas :refer [response-walker]]
+            [herald.services.schemas :as schemas
+                                     :refer [response-walker matches-schema?]]
             [herald.services.clients :as clients])
   (:import [herald.services.schemas SRError SRPagedEntity SREntity]
            [herald.services.clients VeyeClient]
            [blancas.morph.monads Either]))
 
 ;;-- COERCERS
+(def VeyeUser {:fullname s/Str
+               :username s/Str
+               :admin s/Bool
+               s/Keyword s/Any})
+
+(defmulti coerce-user-item
+  (fn [block]
+    (if (matches-schema? VeyeUser block)
+      :entity
+      :default)))
+
+(defmethod coerce-user-item :entity [block]
+  {:name (:fullname block)
+   :username (:username block)
+   :type (if (:admin block)
+           "admin"
+           "user")})
+
+(defmethod coerce-user-item :default [block]
+  block)
+
+;;-- Search coercers
 (defmulti sub-coerce-search
   (fn [block]
     (when (and (vector? block)
@@ -132,6 +155,10 @@
   ((response-walker VeyeEntityResponse coerce-project-item)
    (get response :body {})))
 
+(defmethod coerce-response ::user [_ response]
+  ((response-walker VeyeUser coerce-user-item)
+   (get response :body {})))
+
 (defmethod coerce-response ::raw [_ response]
   (get response :body {}))
 
@@ -139,6 +166,15 @@
   (log/error "Veye: Not supported coercer: " type))
 
 ;;-- API functions
+(sm/defn get-current-user :- Either
+  "Fetches user profile."
+  [client :- VeyeClient]
+  (either [resp (clients/rpc-call client :get "me")]
+    (left resp)
+    (if-let [coerced-dt (coerce-response ::user resp)]
+      (right (SREntity. coerced-dt))
+      (left (SRError. 503 "Coercing error - get-current-user" resp)))))
+
 (sm/defn search :- Either
   "Search packages on VersionEye."
   [client      :- VeyeClient
@@ -149,7 +185,6 @@
     (if-let [coerced-dt (coerce-response ::search resp)]
       (right (SRPagedEntity. (:results coerced-dt) (:paging coerced-dt)))
       (left (SRError. 503 "Coercing error - ::search schema" resp)))))
-
 
 (sm/defn get-projects :- Either
   "get linked projects on VersionEye"

@@ -151,7 +151,7 @@
     (GithubClient. api-url auth client-opts_ )))
 
 
-(defmethod make-client :default [client-type]
+(defmethod make-client :default [client-type _ _]
   (throw (IllegalArgumentException.
            (str "Unsupported client type: " client-type))))
 

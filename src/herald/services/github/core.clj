@@ -183,19 +183,18 @@
 
 (defn- coerce-pagination
   [current-page resp]
-  (let [links (get-in resp [:headers "Link"])]
-    (if-let [link-dt (parse-pagination links)]
-      (let [last-url (url (:last link-dt))
-            last-page (Integer. (get-in last-url [:query "page"]))]
-        {:current current-page
+  (if-let [links (get-in resp [:headers "Link"])]
+    (let [link-dt (parse-pagination links)
+          last-url (url (:last link-dt))
+          last-page (Integer. (get-in last-url [:query "page"]))]
+      {:current current-page
         :per-page default-per-page
         :total last-page
         :total-items (* default-per-page last-page)})
-      {:current current-page
-      :per-page default-per-page
-      :total 1
-      :total-items 1})))
-
+    {:current current-page
+    :per-page default-per-page
+    :total 1
+    :total-items 1}))
 
 ;- response coercers
 (def GithubSearchResponse {:items [GithubRepoItem]

@@ -26,8 +26,8 @@
   (let [auth {:key "" :secret ""}
         client (make-client :veye auth {})]
     (either [resp (veye/search client term {})]
-      (SRResponse. (:status resp) (:msg resp))
-      (SRResponse. 200 resp) ;;iff success
+      (SRResponse. (:status resp) {} (:msg resp))
+      (SRResponse. 200 {} resp) ;;iff success
      )))
 
 

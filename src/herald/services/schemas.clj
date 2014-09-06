@@ -18,7 +18,7 @@
 
 (def Paging {:current s/Int
              :per-page s/Int
-             :total s/Int
+             :total s/Int  ;no. pages aka last page
              :total-items s/Int})
 
 (def Query {:query s/Str

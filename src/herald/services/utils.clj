@@ -1,4 +1,4 @@
-(ns herald.apis.utils
+(ns herald.services.utils
   (:require [cemerick.url :refer [url url-encode]]
             [cheshire.core :refer [parse-string]]
             [clj-http.client :as http]
@@ -7,7 +7,7 @@
 (defn get-template-keys
   [^String template-str]
   (->> template-str
-       (re-seq #"(?<=[\/ | \.]\:\w+)")
+       (re-seq #"(?<=[\/|\.]\:\w{1,50})")
        (map read-string)
        (into #{})))
 

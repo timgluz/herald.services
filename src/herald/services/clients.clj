@@ -45,10 +45,18 @@
                    Number (str path)
                    clojure.lang.Keyword (name path)
                    clojure.lang.Seqable (->> path (interpose \/) (apply str)))]
-    (-> api-url
+    (try
+      (-> api-url
         (url path-str)
         (assoc :query query-params_)
-        str)))
+        str)
+      (catch Exception e
+        (log/error "build-url failed: \n"
+                   {:url api-url
+                    :path path
+                    :query-params query-params}
+                   "\n Reason: \n"
+                   (.getMessage e))))))
 
 (defn do-request
   "does plain HTTP request and returns response boxed into Either-monad"

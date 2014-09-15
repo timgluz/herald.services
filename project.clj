@@ -1,11 +1,11 @@
-(defproject herald.services "0.2.4"
+(defproject herald.services "0.2.5"
   :description "API consumers for Herald App"
   :scm "https://github.com/timgluz/herald.services"
   :url "http://github.com/timgluz/herald.services"
   :license {:name "Eclipse Public License"
             :url "http://www.eclipse.org/legal/epl-v10.html"}
   :min-lein-version "2.0.0"
-  :dependencies [[clj-http "1.0.0"]
+  :dependencies [[clj-http "1.0.1-standalone"]
                  [prismatic/fnhouse "0.1.1"]
                  [prismatic/schema "0.2.6"]
                  [cheshire "5.3.1"]

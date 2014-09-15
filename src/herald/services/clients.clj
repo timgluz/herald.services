@@ -100,7 +100,11 @@
           (left (SRError. (:status resp)
                           (str "VeyeClient cant access resource: " path)
                           resp)))
-        (right (SRResponse. (:status resp) (:headers resp) (:body resp)))))))
+        (if (< 199 (:status resp) 300)
+          (right (SRResponse. (:status resp) (:headers resp) (:body resp)))
+          (left (SRError. (:status resp)
+                          (str "VeyeClient:rpc-call request failed")
+                          resp)))))))
 
 (sm/defrecord GithubClient
   [api-url :- s/Str
@@ -124,7 +128,11 @@
           (left (SRError. (:status resp)
                           (str "Github client cant access resource: " path)
                           resp)))
-        (right (SRResponse. (:status resp) (:headers resp) (:body resp)))))))
+        (if (< 199 (:status resp) 300)
+          (right (SRResponse. (:status resp) (:headers resp) (:body resp)))
+          (left (SRError. (:status resp)
+                          (str "GithubClient:rpc-call Request failed")
+                          resp)))))))
 
 ;;-- CONSTRUCTORS
 (def default-urls {::veye "https://www.versioneye.com/api/v2"

@@ -7,6 +7,33 @@
 (def secret-key "7790a09b31c734f8581d581aa33bb8ece1e7149f")
 (def test-user "heraldtest")
 
+(def test-links "<https://api.github.com/user/repos?page=3&per_page=100>; rel=\"next\",
+<https://api.github.com/user/repos?page=50&per_page=100>; rel=\"last\"")
+
+(facts "parse-pagination"
+  (fact "parses content of Github link headers correctly"
+    (let [dt (git/parse-pagination test-links)]
+      dt => {:next "https://api.github.com/user/repos?page=3&per_page=100"
+             :last "https://api.github.com/user/repos?page=50&per_page=100"}))
+  (fact "returns `nil` if data is partial or missing"
+    (git/parse-pagination nil) => nil
+    (git/parse-pagination "")  => nil
+    (git/parse-pagination "jiberish blaberish") => nil))
+
+(facts "coerce-pagination"
+  (fact "returns correct pagination table"
+    (git/coerce-pagination 1 {:headers {"Link" test-links}})
+     => {:current 1
+         :per-page 100
+         :total 50
+         :total-items 5000})
+  (fact "returns a default pagination table if there's no pagination header"
+    (git/coerce-pagination 1 {:headers {}})
+    => {:current 1
+        :per-page 30
+        :total 1
+        :total-items 1}))
+
 (facts "get-current-user"
   (let [client (make-client :github {:key "test" :secret secret-key} {})]
     (fact "returns correct user info"
@@ -68,6 +95,7 @@
 
 (def test-repo "heraldtest/fantom_hydra")
 (def test-sha "20b9c1193a16c1d86f2a524d30c3e37bd0050bc4")
+(def file-sha "a12f4068eabccd620d10f55194770c76adaebc1e")
 
 (facts "get-repo-branches"
   (let [client (make-client :github {:key "test" :secret secret-key} {})]
@@ -96,11 +124,10 @@
 (facts "get-file-content"
   (let [client (make-client :github {:key "test" :secret secret-key} {})]
     (fact "returns a correct data-map with decoded file content"
-      (let [resp (git/get-file-content client test-repo test-sha "Gemfile")
+      (let [resp (git/get-file-content client test-repo file-sha)
             dt (run-right resp)]
         (right? resp) => true
         (map? dt)     => true
-        (-> dt :data :name) => "Gemfile"
-        (-> dt :data :path) => "Gemfile"
+        (-> dt :data :commit_sha) => file-sha
         (-> dt :data :size) => 1990))))
 

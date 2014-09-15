@@ -7,25 +7,17 @@
             [taoensso.timbre :as log]
             [base64-clj.core :as base64]
             [herald.services.clients :as clients]
-            [herald.services.schemas :as schemas :refer [response-walker]])
+            [herald.services.schemas :as schemas
+                                     :refer [response-walker matches-schema?]])
   (:import [herald.services.schemas SRError SRPagedEntity SREntity]
            [herald.services.clients GithubClient]
            [blancas.morph.monads Either]))
 
-(def default-per-page 30)
-
 ;;-- COERCERS
-;- user entity coercer
-(defn matches-schema?
-  [schema block]
-  (and (map? block)
-       ((comp empty? s/check) schema block)))
-
 ;- matcher schema for multimethod dispatch
 (def GithubUser {:login s/Str
                  (s/optional-key :type) s/Str
                  s/Keyword s/Any})
-
 
 (defmulti coerce-user-item
   (fn [block]
@@ -69,9 +61,10 @@
 (def GithubRepoTreeItem {:path s/Str
                          :mode s/Str
                          :type s/Str
-                         :size s/Int
                          :sha s/Str
-                         :url s/Str})
+                         :url s/Str
+                         (s/optional-key :size) s/Int
+                         s/Keyword s/Any})
 
 (defmulti coerce-repo-item
   (fn [block]
@@ -103,12 +96,12 @@
    :language  (str (:language block))
    :default_branch (:default_branch block)
    :owner_login (get-in block [:owner :login])
+   :owner_type (get-in block [:owner :type])
    :private   (:private block)
    :fork      (:fork block)
    :admin     (get-in block [:permissions :admin])
    :pushable  (get-in block [:permissions :pushable])
-   :pullable  (get-in block [:permissions :pullable])
-   })
+   :pullable  (get-in block [:permissions :pullable])})
 
 ;;-- repo branch coercer
 (defmulti coerce-repo-branch
@@ -143,10 +136,9 @@
   block)
 
 ;;-- repo-file coercer
-(def GithubFileContent {:path s/Str
+(def GithubFileContent {:sha s/Str
                         :encoding s/Str
                         :content s/Str
-                        :name s/Str
                         :size s/Int
                         s/Keyword s/Any})
 
@@ -161,8 +153,7 @@
                          :content str
                          (string/replace #"[^A-Za-z0-9\+\/\=]"  "")
                          (base64/decode "UTF-8"))]
-    {:name (:name block)
-     :path (:path block)
+    {:commit_sha (:sha block)
      :size (:size block)
      :encoding "str"
      :content file-content}))
@@ -170,7 +161,7 @@
 (defmethod coerce-file-content :default [block] block)
 
 ;;-- Pagination coercer
-(defn- parse-pagination
+(defn parse-pagination
   "parses github pagination links from response[:headers][\"Links\"]"
   [links]
   (apply merge
@@ -181,20 +172,22 @@
                  (rest matches))))
       (string/split (str links) #"\,"))))
 
-(defn- coerce-pagination
+(defn coerce-pagination
   [current-page resp]
-  (if-let [links (get-in resp [:headers "Link"])]
-    (let [link-dt (parse-pagination links)
-          last-url (url (:last link-dt))
-          last-page (Integer. (get-in last-url [:query "page"]))]
+  (let [links (get-in resp [:headers "Link"])
+        link-dt (parse-pagination links)]
+    (if (re-matches #"https?:\/\/\S+" (str (:last link-dt)))
+      (let [last-url (url (:last link-dt))
+            last-page (Integer. (get-in last-url [:query "page"]))
+            per-page (Integer. (get-in last-url [:query "per_page"] "30"))]
+        {:current current-page
+          :per-page per-page
+          :total last-page
+          :total-items (* per-page last-page)})
       {:current current-page
-        :per-page default-per-page
-        :total last-page
-        :total-items (* default-per-page last-page)})
-    {:current current-page
-    :per-page default-per-page
-    :total 1
-    :total-items 1}))
+       :per-page 30
+       :total 1
+       :total-items 1})))
 
 ;- response coercers
 (def GithubSearchResponse {:items [GithubRepoItem]
@@ -202,41 +195,38 @@
                            :incomplete_results s/Bool
                            s/Keyword s/Any})
 
-(def GithubEntityList [(s/either GithubRepoItem GithubRepoBranch GithubUser)])
+(def GithubEntityList [(s/either GithubRepoItem GithubRepoBranch GithubUser
+                                 GithubRepoTreeItem)])
 
-(def GithubRepoTree {:sha s/Str
-                     :url s/Str
-                     :tree [GithubRepoTreeItem]
-                     s/Keyword s/Any})
+;;-- response coercers
 
 (defmulti coerce-response (fn [type _] type))
-
 (defmethod coerce-response ::raw [_ response]
   (get response :body {}))
 
 (defmethod coerce-response ::user [_ response]
   ((response-walker GithubUser coerce-user-item)
-   (get response :body {})))
+    (get response :body {})))
 
 (defmethod coerce-response ::user-orgs [_ response]
   ((response-walker GithubEntityList coerce-user-item)
-   (get response :body [])))
+    (get response :body [])))
 
 (defmethod coerce-response ::search [_ response]
   ((response-walker GithubSearchResponse coerce-repo-item)
-   (get response :body {})))
+    (get response :body {})))
 
 (defmethod coerce-response ::repos [_ response]
   ((response-walker GithubEntityList coerce-repo-item)
-   (vec (get response :body []))))
+    (vec (get response :body []))))
 
 (defmethod coerce-response ::branches [_ response]
   ((response-walker GithubEntityList coerce-repo-branch)
-   (vec (get response :body []))))
+    (vec (get response :body []))))
 
 (defmethod coerce-response ::repo-tree [_ response]
-  ((response-walker GithubRepoTree coerce-repo-tree)
-   (get response :body {})))
+  ((response-walker GithubEntityList coerce-repo-tree)
+    (get-in response [:body :tree] {})))
 
 (defmethod coerce-response ::file-content [_ response]
   ((response-walker GithubFileContent coerce-file-content)
@@ -246,6 +236,15 @@
   (log/error "Github/core not supported coercer: " type))
 
 ;;-- API functions
+(sm/defn rate-limit :- Either
+  "returns a hash-map with the latest limits;"
+  [client :- GithubClient]
+  (either [resp (clients/rpc-call client :get "rate_limit")]
+    (left resp)
+    (let [default-dt {:limit 0 :remaining 0 :reset 0}
+          dt (get-in resp [:body :resources :core] default-dt)]
+      (right dt))))
+
 (sm/defn get-current-user :- Either
   "Fetches user information about auth key owners"
   [client :- GithubClient]
@@ -326,21 +325,19 @@
                                   {:recursive 1}]
     (left resp)
     (if-let [coerced-dt (coerce-response ::repo-tree resp)]
-      (right (SREntity. (:tree coerced-dt)))
+      (right (SREntity. coerced-dt))
       (left (SRError. 503 "Coercing error - get-repo-tree" resp)))))
 
 
 (sm/defn get-file-content
-  "gets a content of repofile by the path and ref-key;
+  "gets a content of blob by the path and ref-key;
   Here `ref-key` may be a name of branch, branch's commit-sha or tag id.
   Name of branch gives a latest version; sha or tag-id fixed version;"
   [client :- GithubClient
    repo :- s/Str
-   ref-key :- s/Str
-   file-path :- s/Str]
+   file-sha :- s/Str]
   (either [resp (clients/rpc-call client
-                                  :get ["repos" repo "contents" file-path]
-                                  {:ref ref-key})]
+                                  :get ["repos" repo "git/blobs" file-sha])]
     (left resp)
     (if-let [coerced-dt (coerce-response ::file-content resp)]
       (right (SREntity. coerced-dt))

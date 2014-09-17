@@ -5,7 +5,7 @@
   :license {:name "Eclipse Public License"
             :url "http://www.eclipse.org/legal/epl-v10.html"}
   :min-lein-version "2.0.0"
-  :dependencies [[clj-http "1.0.1-standalone"]
+  :dependencies [[clj-http "1.0.1-SNAPSHOT"]
                  [prismatic/fnhouse "0.1.1"]
                  [prismatic/schema "0.2.6"]
                  [cheshire "5.3.1"]

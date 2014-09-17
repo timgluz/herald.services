@@ -230,7 +230,7 @@
                                       {:multipart [{:name "upload"
                                                     :content temp-file
                                                     :filename file-name}]})]
-        (left (SRError. 503 (str "Cant create new project for: " file-name) file-name))
+        (left (SRError. 503 (str "Cant create new project for: " file-name) resp))
         (if-let [coerced-dt (coerce-response ::project resp)]
           (right (SREntity. coerced-dt))
           (left (SRError. 503 "Coercing error - create::project schema" resp)))))))

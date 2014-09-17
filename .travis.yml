@@ -1,4 +1,4 @@
 language: clojure
 lein: lein
-script: lein midje with-profile test herald.tests.*
+script: lein with-profile test midje  herald.tests.services.*
 

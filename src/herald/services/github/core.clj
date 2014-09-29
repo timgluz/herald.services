@@ -112,7 +112,7 @@
 
 (defmethod coerce-repo-branch :branch [block]
   {:name (-> block :name str)
-   :sha (-> block :commit :sha str)})
+   :commit_sha (-> block :commit :sha str)})
 
 (defmethod coerce-repo-branch :default [block]
   block)

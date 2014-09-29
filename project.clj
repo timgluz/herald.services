@@ -1,4 +1,4 @@
-(defproject herald.services "0.2.5"
+(defproject herald.services "0.2.6"
   :description "API consumers for Herald App"
   :scm "https://github.com/timgluz/herald.services"
   :url "http://github.com/timgluz/herald.services"

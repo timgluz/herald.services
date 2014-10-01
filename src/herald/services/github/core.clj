@@ -6,12 +6,42 @@
             [cemerick.url :refer [url]]
             [taoensso.timbre :as log]
             [base64-clj.core :as base64]
-            [herald.services.clients :as clients]
+            [herald.services.impl :refer [IRPC_Client IAuthorizer]]
+            [herald.services.utils :refer [build-url do-request build-request]]
             [herald.services.schemas :as schemas
-                                     :refer [response-walker matches-schema?]])
-  (:import [herald.services.schemas SRError SRPagedEntity SREntity]
-           [herald.services.clients GithubClient]
-           [blancas.morph.monads Either]))
+                                     :refer [response-walker matches-schema?
+                                             ->SRError ->SRResponse
+                                             ->SRPagedEntity ->SREntity]])
+  (:import [blancas.morph.monads Either]))
+
+(sm/defrecord GithubClient
+  [api-url :- s/Str
+   auth :- schemas/Auth
+   client-opts :- schemas/ClientOptions]
+  IAuthorizer
+  (append-auth [this request-dt]
+    (assoc-in request-dt
+              [:headers "Authorization"]
+              (format "token %s" (get-in this [:auth :secret]))))
+  IRPC_Client
+  (rpc-call [this method path]
+    (.rpc-call this method path {} {}))
+  (rpc-call [this method path query-params]
+    (.rpc-call this method path query-params {}))
+  (rpc-call [this method path query-params extra-client-opts]
+    (let [request-dt (build-request this method path query-params extra-client-opts)]
+      (either [resp (do-request (.append-auth this request-dt))]
+        (do
+          (log/error "GithubClient.rpc-call failed: " path "\n" resp)
+          (left (->SRError (:status resp)
+                          (str "Github client cant access resource: " path)
+                          resp)))
+        (if (< 199 (:status resp) 300)
+          (right (->SRResponse (:status resp) (:headers resp) (:body resp)))
+          (left (->SRError (:status resp)
+                          (str "GithubClient.rpc-call Request failed")
+                          resp)))))))
+
 
 ;;-- COERCERS
 ;- matcher schema for multimethod dispatch
@@ -239,7 +269,7 @@
 (sm/defn rate-limit :- Either
   "returns a hash-map with the latest limits;"
   [client :- GithubClient]
-  (either [resp (clients/rpc-call client :get "rate_limit")]
+  (either [resp (.rpc-call client :get "rate_limit")]
     (left resp)
     (let [default-dt {:limit 0 :remaining 0 :reset 0}
           dt (get-in resp [:body :resources :core] default-dt)]
@@ -248,22 +278,22 @@
 (sm/defn get-current-user :- Either
   "Fetches user information about auth key owners"
   [client :- GithubClient]
-  (either [resp (clients/rpc-call client :get "user")]
+  (either [resp (.rpc-call client :get "user")]
     (left resp) ;; passes client error into caller-fn
     (if-let [coerced-dt (coerce-response ::user resp)]
-      (right (SREntity. coerced-dt))
-      (left (SRError. 503 "Coercing error - get-current-user" resp)))))
+      (right (->SREntity coerced-dt))
+      (left (->SRError 503 "Coercing error - get-current-user" resp)))))
 
 (sm/defn get-user-orgs :- Either
   "Returns list of organization objects, where user has access to."
   [client :- GithubClient
    page :- s/Int]
-  (either [resp (clients/rpc-call client :get "/user/orgs")]
+  (either [resp (.rpc-call client :get "/user/orgs")]
     (left resp)
     (if-let [coerced-dt (coerce-response ::user-orgs resp)]
       (right
-        (SRPagedEntity. coerced-dt (coerce-pagination page resp)))
-      (left (SRError. 503 "Coercing error - get-user-orgs" resp)))))
+        (->SRPagedEntity coerced-dt (coerce-pagination page resp)))
+      (left (->SRError 503 "Coercing error - get-user-orgs" resp)))))
 
 (def SearchOptions {(s/optional-key :sort) s/Str
                     (s/optional-key :order) (s/enum "asc" "desc")})
@@ -273,60 +303,60 @@
   [client :- GithubClient
    term :- s/Str
    options :- SearchOptions]
-  (either [resp (clients/rpc-call client
-                                  :get "/search/repositories"
-                                  (merge {:q term} options))]
+  (either [resp (.rpc-call client
+                          :get "/search/repositories"
+                          (merge {:q term} options))]
     (left resp)
     (if-let [coerced-dt (coerce-response ::search resp)]
-      (right (SREntity. (:items coerced-dt)))
-      (left (SRError. 503 "Coercing error - search" resp)))))
+      (right (->SREntity (:items coerced-dt)))
+      (left (->SRError 503 "Coercing error - search" resp)))))
 
 (sm/defn get-user-repos :- Either
   "returns paginated list of token owner's repos."
   [client :- GithubClient
    page :- s/Int]
-  (either [resp (clients/rpc-call client :get "/user/repos" {:page page :type "all"})]
+  (either [resp (.rpc-call client :get "/user/repos" {:page page :type "all"})]
     (left resp)
     (if-let [coerced-dt (coerce-response ::repos resp)]
       (right
-        (SRPagedEntity. coerced-dt (coerce-pagination page resp)))
-      (left (SRError. 503 "Coercing error - get-user-repos" resp)))))
+        (->SRPagedEntity coerced-dt (coerce-pagination page resp)))
+      (left (->SRError 503 "Coercing error - get-user-repos" resp)))))
 
 (sm/defn get-org-repos :- Either
   "returns list of organization's repos to which token's owner has access"
   [client :- GithubClient
    org-name :- s/Str
    page :- s/Int]
-  (either [resp (clients/rpc-call client :get ["orgs" org-name "repos"] {:page page})]
+  (either [resp (.rpc-call client :get ["orgs" org-name "repos"] {:page page})]
     (left resp)
     (if-let [coerced-dt (coerce-response ::repos resp)]
       (right
-        (SRPagedEntity. coerced-dt (coerce-pagination page resp)))
-      (left (SRError. 503 "Coercing error - get-org-repos" resp)))))
+        (->SRPagedEntity coerced-dt (coerce-pagination page resp)))
+      (left (->SRError 503 "Coercing error - get-org-repos" resp)))))
 
 (sm/defn get-repo-branches :- Either
   "returns list of repo branches"
   [client :- GithubClient
    repo   :- s/Str
    page   :- s/Int]
-  (either [resp (clients/rpc-call client :get ["repos" repo "branches"])]
+  (either [resp (.rpc-call client :get ["repos" repo "branches"])]
     (left resp) ;; pass client error
     (if-let [coerced-dt (coerce-response ::branches resp)]
       (right
-        (SRPagedEntity. coerced-dt (coerce-pagination page resp)))
-      (left (SRError. 503 "Coercing error - get-repo-branches" resp)))))
+        (->SRPagedEntity coerced-dt (coerce-pagination page resp)))
+      (left (->SRError 503 "Coercing error - get-repo-branches" resp)))))
 
 (sm/defn get-repo-tree
   [client :- GithubClient
    repo :- s/Str
    sha :- s/Str]
-  (either [resp (clients/rpc-call client
-                                  :get ["repos" repo "git/trees" sha])
-                                  {:recursive 1}]
+  (either [resp (.rpc-call client
+                          :get ["repos" repo "git/trees" sha])
+                          {:recursive 1}]
     (left resp)
     (if-let [coerced-dt (coerce-response ::repo-tree resp)]
-      (right (SREntity. coerced-dt))
-      (left (SRError. 503 "Coercing error - get-repo-tree" resp)))))
+      (right (->SREntity coerced-dt))
+      (left (->SRError 503 "Coercing error - get-repo-tree" resp)))))
 
 
 (sm/defn get-file-content
@@ -336,10 +366,9 @@
   [client :- GithubClient
    repo :- s/Str
    file-sha :- s/Str]
-  (either [resp (clients/rpc-call client
-                                  :get ["repos" repo "git/blobs" file-sha])]
+  (either [resp (.rpc-call client :get ["repos" repo "git/blobs" file-sha])]
     (left resp)
     (if-let [coerced-dt (coerce-response ::file-content resp)]
-      (right (SREntity. coerced-dt))
-      (left (SRError. 503 "Coercing error - get-file-fontent" resp)))))
+      (right (->SREntity coerced-dt))
+      (left (->SRError 503 "Coercing error - get-file-fontent" resp)))))
 

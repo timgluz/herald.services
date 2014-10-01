@@ -4,12 +4,44 @@
             [blancas.morph.monads :refer [either left right]]
             [clojure.string :as string]
             [taoensso.timbre :as log]
+            [herald.services.impl :refer [IRPC_Client IAuthorizer]]
+            [herald.services.utils :refer [do-request build-url build-request]]
             [herald.services.schemas :as schemas
-                                     :refer [response-walker matches-schema?]]
-            [herald.services.clients :as clients])
-  (:import [herald.services.schemas SRError SRPagedEntity SREntity]
-           [herald.services.clients VeyeClient]
-           [blancas.morph.monads Either]))
+                                     :refer [response-walker matches-schema?
+                                             ->SRResponse ->SRError
+                                             ->SRPagedEntity ->SREntity]])
+  (:import [blancas.morph.monads Either]))
+
+;;-- Client implementation
+(sm/defrecord VeyeClient
+  [api-url  :- s/Str
+   auth     :- schemas/Auth
+   client-opts :- schemas/ClientOptions]
+  IAuthorizer
+  (append-auth [this request-dt]
+    (assoc-in request-dt
+              [:query-params :api_key]
+              (get-in this [:auth :secret])))
+  IRPC_Client
+  (rpc-call [this method path]
+    (.rpc-call this method path {} {}))
+  (rpc-call [this method path query-params]
+    (.rpc-call this method path query-params {}))
+  (rpc-call [this method path query-params extra-client-opts]
+    (let [request-dt (build-request this method path query-params extra-client-opts)]
+      (either [resp (do-request (.append-auth this request-dt))]
+        (do
+          (log/error "VeyeClient:rpc-call failed: " path "\n " resp)
+          (left (->SRError (:status resp)
+                           (str "VeyeClient cant access resource: " path)
+                           resp)))
+        (if (< 199 (:status resp) 300)
+          (right (->SRResponse (:status resp) (:headers resp) (:body resp)))
+          (left (->SRError (:status resp)
+                           (str "VeyeClient:rpc-call request failed")
+                           resp)))))))
+
+
 
 ;;-- COERCERS
 (def VeyeUser {:fullname s/Str
@@ -169,41 +201,41 @@
 (sm/defn get-current-user :- Either
   "Fetches user profile."
   [client :- VeyeClient]
-  (either [resp (clients/rpc-call client :get "me")]
+  (either [resp (.rpc-call client :get "me")]
     (left resp)
     (if-let [coerced-dt (coerce-response ::user resp)]
-      (right (SREntity. coerced-dt))
-      (left (SRError. 503 "Coercing error - get-current-user" resp)))))
+      (right (->SREntity coerced-dt))
+      (left (->SRError 503 "Coercing error - get-current-user" resp)))))
 
 (sm/defn search :- Either
   "Search packages on VersionEye."
   [client      :- VeyeClient
    search-term :- s/Str
    search-args :- s/Any]
-  (either [resp (clients/rpc-call client :get ["products/search" search-term])]
-    (left (SRError. (:status resp) "Failed search" (:body resp)))
+  (either [resp (.rpc-call client :get ["products/search" search-term])]
+    (left (->SRError (:status resp) "Failed search" (:body resp)))
     (if-let [coerced-dt (coerce-response ::search resp)]
-      (right (SRPagedEntity. (:results coerced-dt) (:paging coerced-dt)))
-      (left (SRError. 503 "Coercing error - ::search schema" resp)))))
+      (right (->SRPagedEntity (:results coerced-dt) (:paging coerced-dt)))
+      (left (->SRError 503 "Coercing error - ::search schema" resp)))))
 
 (sm/defn get-projects :- Either
   "get linked projects on VersionEye"
   [client :- VeyeClient]
-  (either [resp (clients/rpc-call client :get "projects")]
-    (left (SRError. (:status resp) "Error while requesting projects list" (:body resp)))
+  (either [resp (.rpc-call client :get "projects")]
+    (left (->SRError (:status resp) "Error while requesting projects list" (:body resp)))
     (if-let [coerced-dt (coerce-response ::projects resp)]
-      (right (SREntity. coerced-dt))
-      (left (SRError. 503 "Coercing error - ::projects schema" resp)))))
+      (right (->SREntity coerced-dt))
+      (left (->SRError 503 "Coercing error - ::projects schema" resp)))))
 
 (sm/defn get-project :- Either
   "get a project related meta-data and a state of dependencies"
   [client :- VeyeClient
    project-key :- s/Str]
-  (either [resp (clients/rpc-call client :get ["projects" project-key])]
-    (left (SRError. (:status resp) "No project info" (:body resp)))
+  (either [resp (.rpc-call client :get ["projects" project-key])]
+    (left (->SRError (:status resp) "No project info" (:body resp)))
     (if-let [coerced-dt (coerce-response ::project resp)]
-      (right (SREntity. coerced-dt))
-      (left (SRError. 503 "Coercing error - get::project schema" resp)))))
+      (right (->SREntity coerced-dt))
+      (left (->SRError 503 "Coercing error - get::project schema" resp)))))
 
 (sm/defn spit->temp
   "Spits file-content into temporary file;"
@@ -221,30 +253,30 @@
    file-name :- s/Str
    file-content :- s/Str]
   (if (empty? file-content)
-    (left (SRError. 404 (str "File content is empty") ""))
+    (left (->SRError 404 (str "File content is empty") ""))
     (let [temp-file (spit->temp file-name file-content)]
       ;; NB! we need temporal file, because veye.API doesnt
       ;; work when :content is plain string
-      (either [resp (clients/rpc-call client
-                                      :post ["projects"] {}
-                                      {:multipart [{:name "upload"
-                                                    :content temp-file
-                                                    :filename file-name}]})]
-        (left (SRError. 503 (str "Cant create new project for: " file-name) resp))
+      (either [resp (.rpc-call client
+                              :post ["projects"] {}
+                              {:multipart [{:name "upload"
+                                            :content temp-file
+                                            :filename file-name}]})]
+        (left (->SRError 503 (str "Cant create new project for: " file-name) resp))
         (if-let [coerced-dt (coerce-response ::project resp)]
-          (right (SREntity. coerced-dt))
-          (left (SRError. 503 "Coercing error - create::project schema" resp)))))))
+          (right (->SREntity coerced-dt))
+          (left (->SRError 503 "Coercing error - create::project schema" resp)))))))
 
 
 (sm/defn delete-project :- Either
   "deletes existing project from VersionEye."
   [client :- VeyeClient
    project-key :- s/Str]
-  (either [resp (clients/rpc-call client :delete ["projects" project-key])]
-    (left (SRError. (:status resp)
+  (either [resp (.rpc-call client :delete ["projects" project-key])]
+    (left (->SRError (:status resp)
                     (str "Error while tried to delete project `" project-key "`.")
                     resp))
-    (right (SREntity. (get-in resp [:body :success] false)))))
+    (right (->SREntity (get-in resp [:body :success] false)))))
 
 
 (sm/defn update-project :- Either
@@ -254,16 +286,16 @@
    file-name :- s/Str
    file-content :- s/Str]
   (if (empty? file-content)
-    (left (SRError. 404 "File content is missing or empty." ""))
+    (left (->SRError 404 "File content is missing or empty." ""))
     (let [temp-file (spit->temp file-name file-content)]
-      (either [resp (clients/rpc-call client
-                                    :post ["projects" project-key] {}
-                                    {:multipart [{:name "project_key"
-                                                  :content project-key}
-                                                 {:name "project_file"
-                                                  :content temp-file
-                                                  :filename file-name}]})]
-        (left (SRError. 503 (str "Cant update project: " project-key) file-name))
+      (either [resp (.rpc-call client
+                              :post ["projects" project-key] {}
+                              {:multipart [{:name "project_key"
+                                            :content project-key}
+                                           {:name "project_file"
+                                            :content temp-file
+                                            :filename file-name}]})]
+        (left (->SRError 503 (str "Cant update project: " project-key) file-name))
         (if-let [coerced-dt (coerce-response ::project resp)]
-          (right (SREntity. coerced-dt))
-          (left (SRError. 503 "Coercing error - update::project schema" resp)))))))
+          (right (->SREntity coerced-dt))
+          (left (->SRError 503 "Coercing error - update::project schema" resp)))))))
